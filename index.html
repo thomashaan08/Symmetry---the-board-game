@@ -318,7 +318,7 @@ function cellCenter(r, c) {
 function drawBoard(highlights) {
   const size = canvas.width;
 
-  ctx.fillStyle = '#a4a8aa';
+  ctx.fillStyle = '#969a9c';
   ctx.fillRect(0, 0, size, size);
 
   if (highlights) {
@@ -329,7 +329,7 @@ function drawBoard(highlights) {
     });
   }
 
-  ctx.strokeStyle = '#3a3f42';
+  ctx.strokeStyle = '#272c2f';
   ctx.lineWidth = 0.9;
   for (let i = 0; i <= N; i++) {
     const x = PAD + i * CELL;
