@@ -364,21 +364,7 @@ function drawStone(r, c, color, alpha) {
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
 
-  if (color === WHITE) {
-    const g = ctx.createLinearGradient(x, y - radius, x, y + radius);
-    g.addColorStop(0,   '#dcdcdc');
-    g.addColorStop(1,   '#b4b4b4');
-    ctx.fillStyle = g;
-    ctx.shadowColor = 'rgba(0,0,0,0.30)';
-    ctx.shadowBlur  = 4;
-  } else {
-    const g = ctx.createLinearGradient(x, y - radius, x, y + radius);
-    g.addColorStop(0,   '#2e2e2e');
-    g.addColorStop(1,   '#0a0a0a');
-    ctx.fillStyle = g;
-    ctx.shadowColor = 'rgba(0,0,0,0.50)';
-    ctx.shadowBlur  = 5;
-  }
+  ctx.fillStyle = color === WHITE ? '#d8d8d8' : '#141414';
 
   ctx.fill();
   ctx.restore();
