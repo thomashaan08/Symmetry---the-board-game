@@ -40,9 +40,7 @@
     justify-content: center;
   }
 
-  .board-wrapper {
-    position: relative;
-  }
+  .board-wrapper { position: relative; }
 
   canvas {
     display: block;
@@ -73,16 +71,9 @@
     margin-bottom: 12px;
   }
 
-  .score-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-  }
+  .score-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 
-  .stone-icon {
-    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
-  }
+  .stone-icon { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; }
   .stone-icon.white { background: #f0f0f0; border: 2px solid #ccc; box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
   .stone-icon.black { background: #1a1a1a; border: 2px solid #444; box-shadow: 0 2px 4px rgba(0,0,0,0.6); }
 
@@ -128,9 +119,42 @@
   .winner-text { font-size: 2rem; font-weight: bold; color: #ffd32a; text-shadow: 0 0 20px rgba(255,211,42,0.5); text-align: center; }
   .winner-sub  { font-size: 1rem; color: #c8d6e5; text-align: center; }
 
-  .rules-btn { font-size: 0.78rem; cursor: pointer; color: #54a0ff; text-decoration: underline; background: none; border: none; padding: 0; width: auto; letter-spacing: 0; }
+  .rules-btn  { font-size: 0.78rem; cursor: pointer; color: #54a0ff; text-decoration: underline; background: none; border: none; padding: 0; width: auto; letter-spacing: 0; }
   .rules-text { display: none; font-size: 0.76rem; color: #8395a7; line-height: 1.6; margin-top: 8px; }
   .rules-text.show { display: block; }
+
+  /* AI toggle */
+  .ai-toggle-row {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; font-size: 0.88rem; color: #c8d6e5;
+  }
+  .ai-toggle-row input[type=checkbox] { accent-color: #54a0ff; width: 15px; height: 15px; cursor: pointer; }
+
+  .thinking-bar {
+    display: none;
+    margin-top: 12px;
+    font-size: 0.78rem;
+    color: #54a0ff;
+    align-items: center;
+    gap: 8px;
+  }
+  .thinking-bar.show { display: flex; }
+
+  .thinking-dots span {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #54a0ff;
+    margin: 0 2px;
+    animation: dotBounce 1.1s infinite ease-in-out;
+  }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.18s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.36s; }
+
+  @keyframes dotBounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40%           { transform: scale(1.1); opacity: 1;   }
+  }
 </style>
 </head>
 <body>
@@ -149,6 +173,7 @@
   </div>
 
   <div class="sidebar">
+
     <div class="panel">
       <h3>Turn</h3>
       <div class="turn-indicator">
@@ -170,6 +195,26 @@
         <span class="score-num" id="blackScore">0</span>
       </div>
       <div style="font-size:0.72rem;color:#556;margin-top:6px;" id="stoneCount"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Opponent</h3>
+      <label class="ai-toggle-row">
+        <input type="checkbox" id="aiToggle" onchange="onAIToggle()">
+        Play vs AI
+      </label>
+      <div id="aiOptions" style="display:none; margin-top:12px;">
+        <div style="font-size:0.75rem;color:#8395a7;margin-bottom:6px;">You play as</div>
+        <div class="size-btns">
+          <button onclick="setHumanColor(1)" id="btnHumanWhite" class="active">White</button>
+          <button onclick="setHumanColor(2)" id="btnHumanBlack">Black</button>
+        </div>
+        <div style="font-size:0.7rem;color:#556;margin-top:8px;" id="aiDepthLabel">Depth: 3</div>
+      </div>
+      <div class="thinking-bar" id="thinkingBar">
+        <div class="thinking-dots"><span></span><span></span><span></span></div>
+        <span>AI thinking…</span>
+      </div>
     </div>
 
     <div class="panel">
@@ -201,6 +246,7 @@
         The board fills up. <strong>Most stones of your color wins.</strong>
       </div>
     </div>
+
   </div>
 </div>
 
@@ -208,13 +254,18 @@
 // ─── Constants ────────────────────────────────────────────────────────────────
 const EMPTY = 0, WHITE = 1, BLACK = 2;
 
-// ─── State ────────────────────────────────────────────────────────────────────
+// ─── Game state ───────────────────────────────────────────────────────────────
 let N = 8;
 let CELL, PAD;
 let board = [];
 let currentPlayer = WHITE;
-let gameOver = false;
-let isAnimating = false;
+let gameOver      = false;
+let isAnimating   = false;
+
+// ─── AI state ─────────────────────────────────────────────────────────────────
+let aiEnabled   = false;
+let aiColor     = BLACK;   // which color the AI plays (default: Black)
+let aiDepth     = 3;
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
@@ -227,21 +278,29 @@ function initBoard() {
 
 function setBoardSize(n) {
   N = n;
-  document.querySelectorAll('.size-btns button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.size-btns button[id^=btn]').forEach(b => b.classList.remove('active'));
   document.getElementById('btn' + n).classList.add('active');
+  // Adjust search depth for larger boards
+  aiDepth = n <= 8 ? 3 : 2;
+  document.getElementById('aiDepthLabel').textContent = `Depth: ${aiDepth}`;
   newGame();
 }
 
 function newGame() {
   initBoard();
   currentPlayer = WHITE;
-  gameOver = false;
-  isAnimating = false;
+  gameOver      = false;
+  isAnimating   = false;
   document.getElementById('winnerOverlay').classList.remove('show');
   document.getElementById('logArea').innerHTML = '';
+  setThinking(false);
   updateCellSize();
   updateUI();
   drawBoard();
+  // If AI plays White (= first to move), kick off its first move
+  if (aiEnabled && aiColor === WHITE) {
+    setTimeout(triggerAIMove, 400);
+  }
 }
 
 function updateCellSize() {
@@ -263,17 +322,11 @@ function cellCenter(r, c) {
 function drawBoard(highlights) {
   const size = canvas.width;
 
-  // Board background
   ctx.fillStyle = '#cfc8bc';
   ctx.fillRect(0, 0, size, size);
-
-  // Slight wood grain feel
   ctx.fillStyle = '#c9c1b4';
-  for (let i = 0; i < size; i += 6) {
-    ctx.fillRect(0, i, size, 1);
-  }
+  for (let i = 0; i < size; i += 6) ctx.fillRect(0, i, size, 1);
 
-  // Square highlight backgrounds
   if (highlights) {
     highlights.filter(h => h.type === 'square').forEach(h => {
       const x = PAD + h.c * CELL, y = PAD + h.r * CELL, w = h.size * CELL;
@@ -282,7 +335,6 @@ function drawBoard(highlights) {
     });
   }
 
-  // Grid lines
   ctx.strokeStyle = '#7a6f60';
   ctx.lineWidth = 0.9;
   for (let i = 0; i <= N; i++) {
@@ -292,7 +344,6 @@ function drawBoard(highlights) {
     ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(PAD + N * CELL, y); ctx.stroke();
   }
 
-  // Square highlight borders
   if (highlights) {
     highlights.filter(h => h.type === 'square').forEach(h => {
       const x = PAD + h.c * CELL, y = PAD + h.r * CELL, w = h.size * CELL;
@@ -302,16 +353,12 @@ function drawBoard(highlights) {
     });
   }
 
-  // Stones
   for (let r = 0; r < N; r++)
     for (let c = 0; c < N; c++)
-      if (board[r][c] !== EMPTY)
-        drawStone(r, c, board[r][c], 1.0);
+      if (board[r][c] !== EMPTY) drawStone(r, c, board[r][c], 1.0);
 
-  // Axis lines (on top of stones)
-  if (highlights) {
+  if (highlights)
     highlights.filter(h => h.type === 'axis').forEach(h => drawAxisLine(h));
-  }
 }
 
 function drawStone(r, c, color, alpha) {
@@ -325,9 +372,9 @@ function drawStone(r, c, color, alpha) {
 
   if (color === WHITE) {
     const g = ctx.createRadialGradient(x - radius*0.28, y - radius*0.28, radius*0.04, x, y, radius);
-    g.addColorStop(0,   '#ffffff');
-    g.addColorStop(0.65,'#e8e8e8');
-    g.addColorStop(1,   '#bbb');
+    g.addColorStop(0,    '#ffffff');
+    g.addColorStop(0.65, '#e8e8e8');
+    g.addColorStop(1,    '#bbb');
     ctx.fillStyle = g;
     ctx.shadowColor = 'rgba(0,0,0,0.35)';
     ctx.shadowBlur  = 5;
@@ -346,11 +393,8 @@ function drawStone(r, c, color, alpha) {
 }
 
 function drawAxisLine(h) {
-  // h: { axis:'H'|'V', frac:0..1, sq:{r,c,size} }
   const sq = h.sq;
-  const x0 = PAD + sq.c * CELL;
-  const y0 = PAD + sq.r * CELL;
-  const w  = sq.size * CELL;
+  const x0 = PAD + sq.c * CELL, y0 = PAD + sq.r * CELL, w = sq.size * CELL;
 
   ctx.save();
   ctx.setLineDash([7, 5]);
@@ -369,35 +413,35 @@ function drawAxisLine(h) {
   ctx.restore();
 }
 
-// ─── Symmetry detection ───────────────────────────────────────────────────────
-/**
- * Returns array of axis descriptors {axis:'H'|'V', frac}
- * frac is the position (0-1) within the square for the axis line.
- */
-function getSymmetryAxes(r, c, size) {
+// ─── Game logic (board param defaults to global `board`) ─────────────────────
+
+function isFull(r, c, size, b = board) {
+  for (let dr = 0; dr < size; dr++)
+    for (let dc = 0; dc < size; dc++)
+      if (b[r + dr][c + dc] === EMPTY) return false;
+  return true;
+}
+
+function getSymmetryAxes(r, c, size, b = board) {
   const results = [];
 
-  // Horizontal (top ↔ bottom): row dr mirrors row (size-1-dr)
+  // Horizontal: top half mirrors bottom half
   {
     let sym = true;
     outer: for (let dr = 0; dr < Math.floor(size / 2); dr++) {
       for (let dc = 0; dc < size; dc++) {
-        if (board[r + dr][c + dc] !== board[r + size - 1 - dr][c + dc]) {
-          sym = false; break outer;
-        }
+        if (b[r + dr][c + dc] !== b[r + size - 1 - dr][c + dc]) { sym = false; break outer; }
       }
     }
     if (sym) results.push({axis: 'H', frac: 0.5});
   }
 
-  // Vertical (left ↔ right): col dc mirrors col (size-1-dc)
+  // Vertical: left half mirrors right half
   {
     let sym = true;
     outer: for (let dc = 0; dc < Math.floor(size / 2); dc++) {
       for (let dr = 0; dr < size; dr++) {
-        if (board[r + dr][c + dc] !== board[r + dr][c + size - 1 - dc]) {
-          sym = false; break outer;
-        }
+        if (b[r + dr][c + dc] !== b[r + dr][c + size - 1 - dc]) { sym = false; break outer; }
       }
     }
     if (sym) results.push({axis: 'V', frac: 0.5});
@@ -406,71 +450,52 @@ function getSymmetryAxes(r, c, size) {
   return results;
 }
 
-function isFull(r, c, size) {
-  for (let dr = 0; dr < size; dr++)
-    for (let dc = 0; dc < size; dc++)
-      if (board[r + dr][c + dc] === EMPTY) return false;
-  return true;
-}
-
-/**
- * Find all squares that:
- *   1. Contain cell (row, col)
- *   2. Are fully filled
- *   3. Are H- or V-symmetric
- */
-function findTriggeredSymmetries(row, col) {
+function findTriggeredSymmetries(row, col, b = board) {
   const found = [];
   const seen  = new Set();
 
   for (let size = 2; size <= N; size++) {
-    const rMin = Math.max(0, row - size + 1);
-    const rMax = Math.min(N - size, row);
-    const cMin = Math.max(0, col - size + 1);
-    const cMax = Math.min(N - size, col);
+    const rMin = Math.max(0, row - size + 1), rMax = Math.min(N - size, row);
+    const cMin = Math.max(0, col - size + 1), cMax = Math.min(N - size, col);
 
     for (let r = rMin; r <= rMax; r++) {
       for (let c = cMin; c <= cMax; c++) {
-        if (!isFull(r, c, size)) continue;
-        const axes = getSymmetryAxes(r, c, size);
+        if (!isFull(r, c, size, b)) continue;
+        const axes = getSymmetryAxes(r, c, size, b);
         if (axes.length === 0) continue;
         const key = `${r},${c},${size}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          found.push({r, c, size, axes});
-        }
+        if (!seen.has(key)) { seen.add(key); found.push({r, c, size, axes}); }
       }
     }
   }
   return found;
 }
 
-function colorSquare(sq, color) {
+function colorSquare(sq, color, b = board) {
   for (let dr = 0; dr < sq.size; dr++)
     for (let dc = 0; dc < sq.size; dc++)
-      board[sq.r + dr][sq.c + dc] = color;
+      b[sq.r + dr][sq.c + dc] = color;
 }
 
-function countStones() {
-  let w = 0, b = 0;
+function countStones(b = board) {
+  let w = 0, bk = 0;
   for (let r = 0; r < N; r++)
     for (let c = 0; c < N; c++) {
-      if (board[r][c] === WHITE) w++;
-      else if (board[r][c] === BLACK) b++;
+      if (b[r][c] === WHITE) w++;
+      else if (b[r][c] === BLACK) bk++;
     }
-  return {w, b};
+  return {w, b: bk};
 }
 
-function isBoardFull() {
+function isBoardFull(b = board) {
   for (let r = 0; r < N; r++)
     for (let c = 0; c < N; c++)
-      if (board[r][c] === EMPTY) return false;
+      if (b[r][c] === EMPTY) return false;
   return true;
 }
 
 // ─── Animation helpers ────────────────────────────────────────────────────────
 
-/** True when every cell in the square is already `color`. */
 function squareAlreadyFilled(sym, color) {
   for (let dr = 0; dr < sym.size; dr++)
     for (let dc = 0; dc < sym.size; dc++)
@@ -478,15 +503,10 @@ function squareAlreadyFilled(sym, color) {
   return true;
 }
 
-/**
- * Remove any square that is fully contained inside a strictly larger square
- * in the same list. Only the outermost (largest enclosing) squares are kept.
- */
 function removeContained(syms) {
   return syms.filter((a, i) =>
     !syms.some((b, j) =>
-      i !== j &&
-      b.size > a.size &&
+      i !== j && b.size > a.size &&
       b.r <= a.r && b.c <= a.c &&
       b.r + b.size >= a.r + a.size &&
       b.c + b.size >= a.c + a.size
@@ -494,7 +514,6 @@ function removeContained(syms) {
   );
 }
 
-/** Build the canvas highlight descriptors for one symmetry square. */
 function makeHighlights(sym) {
   return {
     sq:   {type: 'square', r: sym.r, c: sym.c, size: sym.size},
@@ -505,141 +524,84 @@ function makeHighlights(sym) {
 
 // ─── Animation ────────────────────────────────────────────────────────────────
 
-/**
- * Main entry point for symmetry animation after a move.
- *
- * Rules applied here:
- *  1. Squares already entirely the placed color are skipped (no visual change).
- *  2. Smaller squares fully contained inside a larger symmetric square are
- *     suppressed – only the outermost square is highlighted.
- *  3. Single square  → highlight then flash (original flow).
- *     Multiple squares → highlight each one-by-one, THEN flash all together.
- */
 function animateSymmetries(syms, placedColor, done) {
-  // Step 1: remove contained squares
   const outermost = removeContained(syms);
+  const toAnimate = outermost.filter(s => !squareAlreadyFilled(s, placedColor));
 
-  // Step 2: separate those that actually change color from no-ops
-  const toAnimate  = outermost.filter(s => !squareAlreadyFilled(s, placedColor));
-  const noChange   = outermost.filter(s =>  squareAlreadyFilled(s, placedColor));
-
-  // No-op squares: color is already correct, nothing to do.
-  // (colorSquare would be a no-op anyway, so we skip it.)
-
-  if (toAnimate.length === 0) {
-    done();
-    return;
-  }
-
-  if (toAnimate.length === 1) {
-    animateOneSym(toAnimate[0], placedColor, done);
-  } else {
-    animateMultiSym(toAnimate, placedColor, done);
-  }
+  if (toAnimate.length === 0) { done(); return; }
+  if (toAnimate.length === 1) { animateOneSym(toAnimate[0], placedColor, done); }
+  else                        { animateMultiSym(toAnimate, placedColor, done); }
 }
 
-// ── Single-square animation (unchanged behaviour) ──────────────────────────
-
 function animateOneSym(sym, color, done) {
-  const T_HIGHLIGHT = 350;
-  const T_AXIS      = 600;
-  const T_FLASH     = 500;
-
+  const T_HIGHLIGHT = 350, T_AXIS = 600, T_FLASH = 500;
   const {sq: sqHL, axis: axHL} = makeHighlights(sym);
   const start = performance.now();
 
   function tick(now) {
     const t = now - start;
-
     if (t < T_HIGHLIGHT) {
       drawBoard([sqHL]);
     } else if (t < T_HIGHLIGHT + T_AXIS) {
       drawBoard([sqHL, axHL]);
     } else if (t < T_HIGHLIGHT + T_AXIS + T_FLASH) {
-      const p        = (t - T_HIGHLIGHT - T_AXIS) / T_FLASH;
-      const newAlpha = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(p * Math.PI));
-
+      const p = (t - T_HIGHLIGHT - T_AXIS) / T_FLASH;
+      const a = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(p * Math.PI));
       drawBoard([sqHL, axHL]);
-      for (let dr = 0; dr < sym.size; dr++) {
+      for (let dr = 0; dr < sym.size; dr++)
         for (let dc = 0; dc < sym.size; dc++) {
           const rr = sym.r + dr, cc = sym.c + dc;
           if (board[rr][cc] !== color) {
-            drawStone(rr, cc, board[rr][cc], 1 - newAlpha);
-            drawStone(rr, cc, color,         newAlpha);
+            drawStone(rr, cc, board[rr][cc], 1 - a);
+            drawStone(rr, cc, color, a);
           }
         }
-      }
     } else {
       colorSquare(sym, color);
       drawBoard();
-      done();
-      return;
+      done(); return;
     }
-
     requestAnimationFrame(tick);
   }
-
   requestAnimationFrame(tick);
 }
 
-// ── Multi-square animation: highlight each in turn, then flash all ──────────
-
 function animateMultiSym(syms, color, done) {
-  const T_SQ   = 350;   // square outline only
-  const T_AXIS = 600;   // + axis line
-  const T_FLASH = 550;  // simultaneous color-change flash for all squares
-
+  const T_SQ = 350, T_AXIS = 600, T_FLASH = 550;
   let idx = 0;
 
-  // Phase A: show each square's highlight + axis sequentially
   function highlightNext() {
     if (idx >= syms.length) { flashAll(); return; }
-
     const {sq: sqHL, axis: axHL} = makeHighlights(syms[idx++]);
     const start = performance.now();
 
     function tick(now) {
       const t = now - start;
-      if (t < T_SQ) {
-        drawBoard([sqHL]);
-        requestAnimationFrame(tick);
-      } else if (t < T_SQ + T_AXIS) {
-        drawBoard([sqHL, axHL]);
-        requestAnimationFrame(tick);
-      } else {
-        drawBoard();   // clear before next square's highlight
-        highlightNext();
-      }
+      if      (t < T_SQ)          { drawBoard([sqHL]);       requestAnimationFrame(tick); }
+      else if (t < T_SQ + T_AXIS) { drawBoard([sqHL, axHL]); requestAnimationFrame(tick); }
+      else                        { drawBoard(); highlightNext(); }
     }
     requestAnimationFrame(tick);
   }
 
-  // Phase B: show ALL squares + flash color change simultaneously
   function flashAll() {
-    const allHL = syms.flatMap(sym => {
-      const {sq, axis} = makeHighlights(sym);
-      return [sq, axis];
-    });
-
+    const allHL = syms.flatMap(sym => { const h = makeHighlights(sym); return [h.sq, h.axis]; });
     const start = performance.now();
 
     function tick(now) {
       const t = now - start;
       if (t < T_FLASH) {
-        const p        = t / T_FLASH;
-        const newAlpha = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(p * Math.PI));
-
+        const a = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos((t / T_FLASH) * Math.PI));
         drawBoard(allHL);
         syms.forEach(sym => {
-          for (let dr = 0; dr < sym.size; dr++) {
+          for (let dr = 0; dr < sym.size; dr++)
             for (let dc = 0; dc < sym.size; dc++) {
               const rr = sym.r + dr, cc = sym.c + dc;
               if (board[rr][cc] !== color) {
-                drawStone(rr, cc, board[rr][cc], 1 - newAlpha);
-                drawStone(rr, cc, color,         newAlpha);
+                drawStone(rr, cc, board[rr][cc], 1 - a);
+                drawStone(rr, cc, color, a);
               }
             }
-          }
         });
         requestAnimationFrame(tick);
       } else {
@@ -654,71 +616,73 @@ function animateMultiSym(syms, color, done) {
   highlightNext();
 }
 
-// ─── Input ────────────────────────────────────────────────────────────────────
+// ─── Move execution (shared by human and AI) ─────────────────────────────────
 
-canvas.addEventListener('click', function(e) {
-  if (gameOver || isAnimating) return;
-
-  const rect  = canvas.getBoundingClientRect();
-  const scaleX = canvas.width  / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const mx = (e.clientX - rect.left) * scaleX;
-  const my = (e.clientY - rect.top)  * scaleY;
-
-  const col = Math.floor((mx - PAD) / CELL);
-  const row = Math.floor((my - PAD) / CELL);
-
-  if (row < 0 || row >= N || col < 0 || col >= N) return;
-  if (board[row][col] !== EMPTY) return;
-
-  // Place stone
+function executeMove(row, col) {
   board[row][col] = currentPlayer;
   const placedColor = currentPlayer;
   const colName     = currentPlayer === WHITE ? 'White' : 'Black';
   const colLetter   = String.fromCharCode(65 + col);
   addLog(`${colName} → ${colLetter}${row + 1}`, 'placed');
 
-  // Detect symmetries BEFORE any coloring
-  const rawSyms    = findTriggeredSymmetries(row, col);
-  // Apply same filters as animateSymmetries so log matches what will be shown
-  const outerSyms  = removeContained(rawSyms);
-  const animSyms   = outerSyms.filter(s => !squareAlreadyFilled(s, placedColor));
+  const rawSyms   = findTriggeredSymmetries(row, col);
+  const outerSyms = removeContained(rawSyms);
+  const animSyms  = outerSyms.filter(s => !squareAlreadyFilled(s, placedColor));
 
   animSyms.forEach(s => {
     const axStr = s.axes.map(a => a.axis === 'H' ? 'horiz' : 'vert').join(' + ');
     addLog(`  ↺ ${s.size}×${s.size} sym (${axStr}) → ${colName}`, 'symmetry');
   });
 
+  const afterMove = () => {
+    switchTurn();
+    updateUI();
+    if (isBoardFull()) { endGame(); return; }
+    triggerAIMove();
+  };
+
   if (animSyms.length > 0) {
     isAnimating = true;
-    drawBoard(); // draw placed stone first
-    // small delay so the stone appears before animation starts
+    drawBoard();
     setTimeout(() => {
       animateSymmetries(rawSyms, placedColor, () => {
         isAnimating = false;
-        switchTurn();
-        updateUI();
-        if (isBoardFull()) endGame();
+        afterMove();
       });
     }, 120);
   } else {
     drawBoard();
-    switchTurn();
-    updateUI();
-    if (isBoardFull()) endGame();
+    afterMove();
   }
-});
+}
 
-// Ghost stone on hover
-canvas.addEventListener('mousemove', function(e) {
+// ─── Input ────────────────────────────────────────────────────────────────────
+
+canvas.addEventListener('click', function(e) {
   if (gameOver || isAnimating) return;
-  const rect  = canvas.getBoundingClientRect();
+  if (aiEnabled && currentPlayer === aiColor) return;  // AI's turn – block human
+
+  const rect   = canvas.getBoundingClientRect();
   const scaleX = canvas.width  / rect.width;
   const scaleY = canvas.height / rect.height;
-  const mx = (e.clientX - rect.left) * scaleX;
-  const my = (e.clientY - rect.top)  * scaleY;
-  const col = Math.floor((mx - PAD) / CELL);
-  const row = Math.floor((my - PAD) / CELL);
+  const col    = Math.floor(((e.clientX - rect.left) * scaleX - PAD) / CELL);
+  const row    = Math.floor(((e.clientY - rect.top)  * scaleY - PAD) / CELL);
+
+  if (row < 0 || row >= N || col < 0 || col >= N) return;
+  if (board[row][col] !== EMPTY) return;
+
+  executeMove(row, col);
+});
+
+canvas.addEventListener('mousemove', function(e) {
+  if (gameOver || isAnimating) return;
+  if (aiEnabled && currentPlayer === aiColor) return;
+
+  const rect   = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const col    = Math.floor(((e.clientX - rect.left) * scaleX - PAD) / CELL);
+  const row    = Math.floor(((e.clientY - rect.top)  * scaleY - PAD) / CELL);
 
   drawBoard();
   if (row >= 0 && row < N && col >= 0 && col < N && board[row][col] === EMPTY)
@@ -729,6 +693,126 @@ canvas.addEventListener('mouseleave', function() {
   if (!isAnimating) drawBoard();
 });
 
+// ─── AI ───────────────────────────────────────────────────────────────────────
+
+function cloneBoard(b) { return b.map(row => [...row]); }
+
+/** Apply a move on board copy `b`, resolving symmetries in-place. */
+function applyMoveOnCopy(b, row, col, player) {
+  b[row][col] = player;
+  const syms = removeContained(findTriggeredSymmetries(row, col, b));
+  syms.forEach(s => colorSquare(s, player, b));
+}
+
+/** Evaluation: positive = White advantage, negative = Black advantage. */
+function evaluate(b) {
+  const {w, b: bk} = countStones(b);
+  return w - bk;
+}
+
+/**
+ * Minimax with alpha-beta pruning.
+ * isMaximizing = true  →  White to move (wants to maximise score).
+ * isMaximizing = false →  Black to move (wants to minimise score).
+ */
+function minimax(b, depth, alpha, beta, isMaximizing) {
+  if (depth === 0 || isBoardFull(b)) return evaluate(b);
+
+  const player = isMaximizing ? WHITE : BLACK;
+  const half   = (N - 1) / 2;
+
+  // Collect empty cells, ordered center-first for better pruning
+  const moves = [];
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      if (b[r][c] === EMPTY) moves.push([r, c]);
+  moves.sort(([r1,c1],[r2,c2]) =>
+    (Math.abs(r1-half) + Math.abs(c1-half)) - (Math.abs(r2-half) + Math.abs(c2-half))
+  );
+
+  if (isMaximizing) {
+    let best = -Infinity;
+    for (const [r, c] of moves) {
+      const nb = cloneBoard(b);
+      applyMoveOnCopy(nb, r, c, player);
+      best  = Math.max(best, minimax(nb, depth - 1, alpha, beta, false));
+      alpha = Math.max(alpha, best);
+      if (alpha >= beta) break;   // beta cut-off
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for (const [r, c] of moves) {
+      const nb = cloneBoard(b);
+      applyMoveOnCopy(nb, r, c, player);
+      best = Math.min(best, minimax(nb, depth - 1, alpha, beta, true));
+      beta = Math.min(beta, best);
+      if (alpha >= beta) break;   // alpha cut-off
+    }
+    return best;
+  }
+}
+
+/** Return [row, col] of the best move for the AI. */
+function getBestMove() {
+  const isMax = aiColor === WHITE;
+  const half  = (N - 1) / 2;
+
+  const moves = [];
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      if (board[r][c] === EMPTY) moves.push([r, c]);
+  moves.sort(([r1,c1],[r2,c2]) =>
+    (Math.abs(r1-half) + Math.abs(c1-half)) - (Math.abs(r2-half) + Math.abs(c2-half))
+  );
+
+  let bestMove  = moves[0];
+  let bestScore = isMax ? -Infinity : Infinity;
+
+  for (const [r, c] of moves) {
+    const nb    = cloneBoard(board);
+    applyMoveOnCopy(nb, r, c, aiColor);
+    const score = minimax(nb, aiDepth - 1, -Infinity, Infinity, !isMax);
+    if ((isMax && score > bestScore) || (!isMax && score < bestScore)) {
+      bestScore = score;
+      bestMove  = [r, c];
+    }
+  }
+
+  return bestMove;
+}
+
+function triggerAIMove() {
+  if (!aiEnabled || currentPlayer !== aiColor || gameOver || isAnimating) return;
+
+  setThinking(true);
+  // Yield to the browser so UI updates (thinking indicator) before blocking search
+  setTimeout(() => {
+    const [row, col] = getBestMove();
+    setThinking(false);
+    executeMove(row, col);
+  }, 30);
+}
+
+// ─── AI UI controls ───────────────────────────────────────────────────────────
+
+function onAIToggle() {
+  aiEnabled = document.getElementById('aiToggle').checked;
+  document.getElementById('aiOptions').style.display = aiEnabled ? 'block' : 'none';
+  newGame();
+}
+
+function setHumanColor(humanColor) {
+  aiColor = (humanColor === WHITE) ? BLACK : WHITE;
+  document.getElementById('btnHumanWhite').classList.toggle('active', humanColor === WHITE);
+  document.getElementById('btnHumanBlack').classList.toggle('active', humanColor === BLACK);
+  newGame();
+}
+
+function setThinking(on) {
+  document.getElementById('thinkingBar').classList.toggle('show', on);
+}
+
 // ─── UI ───────────────────────────────────────────────────────────────────────
 
 function switchTurn() {
@@ -736,19 +820,19 @@ function switchTurn() {
 }
 
 function updateUI() {
-  const {w, b} = countStones();
+  const {w, b: bk} = countStones();
   document.getElementById('whiteScore').textContent = w;
-  document.getElementById('blackScore').textContent = b;
-  document.getElementById('stoneCount').textContent = `${w + b} / ${N * N} placed`;
+  document.getElementById('blackScore').textContent = bk;
+  document.getElementById('stoneCount').textContent = `${w + bk} / ${N * N} placed`;
 
   const ts = document.getElementById('turnStone');
   const tt = document.getElementById('turnText');
   if (currentPlayer === WHITE) {
     ts.style.background = '#f0f0f0'; ts.style.border = '2px solid #ccc';
-    tt.textContent = "White's turn";
+    tt.textContent = aiEnabled && aiColor === WHITE ? "AI's turn (White)" : "White's turn";
   } else {
     ts.style.background = '#1a1a1a'; ts.style.border = '2px solid #555';
-    tt.textContent = "Black's turn";
+    tt.textContent = aiEnabled && aiColor === BLACK ? "AI's turn (Black)" : "Black's turn";
   }
 }
 
@@ -763,15 +847,14 @@ function addLog(text, cls) {
 
 function endGame() {
   gameOver = true;
-  const {w, b} = countStones();
-  const overlay = document.getElementById('winnerOverlay');
-  overlay.classList.add('show');
-  if (w > b) {
+  const {w, b: bk} = countStones();
+  document.getElementById('winnerOverlay').classList.add('show');
+  if (w > bk) {
     document.getElementById('winnerText').textContent = 'White Wins!';
-    document.getElementById('winnerSub').textContent  = `White: ${w}  •  Black: ${b}`;
-  } else if (b > w) {
+    document.getElementById('winnerSub').textContent  = `White: ${w}  •  Black: ${bk}`;
+  } else if (bk > w) {
     document.getElementById('winnerText').textContent = 'Black Wins!';
-    document.getElementById('winnerSub').textContent  = `Black: ${b}  •  White: ${w}`;
+    document.getElementById('winnerSub').textContent  = `Black: ${bk}  •  White: ${w}`;
   } else {
     document.getElementById('winnerText').textContent = "It's a Draw!";
     document.getElementById('winnerSub').textContent  = `Both players: ${w} stones`;
@@ -784,10 +867,7 @@ function toggleRules() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
-window.addEventListener('resize', () => {
-  updateCellSize();
-  drawBoard();
-});
+window.addEventListener('resize', () => { updateCellSize(); drawBoard(); });
 
 newGame();
 </script>
