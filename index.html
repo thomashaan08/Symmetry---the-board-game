@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Symmetry - The Board Game</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    font-family: 'Segoe UI', sans-serif;
+    color: #eee;
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: 2rem;
+    margin-bottom: 6px;
+    letter-spacing: 2px;
+    color: #c8d6e5;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: #8395a7;
+    margin-bottom: 18px;
+    letter-spacing: 1px;
+  }
+
+  .game-area {
+    display: flex;
+    gap: 30px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .board-wrapper {
+    position: relative;
+  }
+
+  canvas {
+    display: block;
+    cursor: pointer;
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .sidebar {
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .panel {
+    background: #16213e;
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid #0f3460;
+  }
+
+  .panel h3 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #8395a7;
+    margin-bottom: 12px;
+  }
+
+  .score-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .stone-icon {
+    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  }
+  .stone-icon.white { background: #f0f0f0; border: 2px solid #ccc; box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+  .stone-icon.black { background: #1a1a1a; border: 2px solid #444; box-shadow: 0 2px 4px rgba(0,0,0,0.6); }
+
+  .score-label { font-size: 0.9rem; color: #c8d6e5; flex: 1; }
+  .score-num   { font-size: 1.4rem; font-weight: bold; color: #fff; }
+
+  .turn-indicator {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px; border-radius: 8px; background: #0f3460;
+  }
+  .turn-stone { width: 26px; height: 26px; border-radius: 50%; transition: all 0.3s; }
+  .turn-text  { font-size: 0.95rem; color: #c8d6e5; }
+
+  .log-area {
+    max-height: 180px; overflow-y: auto;
+    font-size: 0.78rem; color: #8395a7; line-height: 1.6;
+  }
+  .log-area::-webkit-scrollbar { width: 4px; }
+  .log-area::-webkit-scrollbar-track { background: #0f3460; }
+  .log-area::-webkit-scrollbar-thumb { background: #1a4a7a; border-radius: 2px; }
+  .log-entry { padding: 2px 0; border-bottom: 1px solid #0a2040; }
+  .log-entry.placed   { color: #c8d6e5; }
+  .log-entry.symmetry { color: #ffd32a; }
+
+  button {
+    background: #0f3460; color: #c8d6e5; border: 1px solid #1a4a7a;
+    padding: 10px 16px; border-radius: 8px; cursor: pointer;
+    font-size: 0.85rem; letter-spacing: 1px; transition: all 0.2s; width: 100%;
+  }
+  button:hover { background: #1a4a7a; color: #fff; }
+
+  .size-btns { display: flex; gap: 6px; }
+  .size-btns button { flex: 1; padding: 7px 4px; font-size: 0.78rem; }
+  .size-btns button.active { background: #54a0ff; color: #fff; border-color: #54a0ff; }
+
+  .winner-overlay {
+    display: none; position: absolute; inset: 0;
+    background: rgba(10,20,40,0.88); border-radius: 6px;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; z-index: 10;
+  }
+  .winner-overlay.show { display: flex; }
+  .winner-text { font-size: 2rem; font-weight: bold; color: #ffd32a; text-shadow: 0 0 20px rgba(255,211,42,0.5); text-align: center; }
+  .winner-sub  { font-size: 1rem; color: #c8d6e5; text-align: center; }
+
+  .rules-btn { font-size: 0.78rem; cursor: pointer; color: #54a0ff; text-decoration: underline; background: none; border: none; padding: 0; width: auto; letter-spacing: 0; }
+  .rules-text { display: none; font-size: 0.76rem; color: #8395a7; line-height: 1.6; margin-top: 8px; }
+  .rules-text.show { display: block; }
+</style>
+</head>
+<body>
+
+<h1>SYMMETRY</h1>
+<p class="subtitle">Abstract Territory Board Game</p>
+
+<div class="game-area">
+  <div class="board-wrapper">
+    <canvas id="gameCanvas"></canvas>
+    <div class="winner-overlay" id="winnerOverlay">
+      <div class="winner-text" id="winnerText"></div>
+      <div class="winner-sub"  id="winnerSub"></div>
+      <button onclick="newGame()" style="width:140px;margin-top:8px;">Play Again</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="panel">
+      <h3>Turn</h3>
+      <div class="turn-indicator">
+        <div class="turn-stone" id="turnStone"></div>
+        <div class="turn-text"  id="turnText"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Score</h3>
+      <div class="score-row">
+        <div class="stone-icon white"></div>
+        <span class="score-label">White</span>
+        <span class="score-num" id="whiteScore">0</span>
+      </div>
+      <div class="score-row">
+        <div class="stone-icon black"></div>
+        <span class="score-label">Black</span>
+        <span class="score-num" id="blackScore">0</span>
+      </div>
+      <div style="font-size:0.72rem;color:#556;margin-top:6px;" id="stoneCount"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Board Size</h3>
+      <div class="size-btns">
+        <button onclick="setBoardSize(6)"  id="btn6">6×6</button>
+        <button onclick="setBoardSize(8)"  id="btn8"  class="active">8×8</button>
+        <button onclick="setBoardSize(10)" id="btn10">10×10</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <button onclick="newGame()">New Game</button>
+    </div>
+
+    <div class="panel">
+      <h3>Move Log</h3>
+      <div class="log-area" id="logArea"></div>
+    </div>
+
+    <div class="panel">
+      <button class="rules-btn" onclick="toggleRules()">Show / Hide Rules</button>
+      <div class="rules-text" id="rulesText">
+        <strong>White starts.</strong> Players alternate placing stones on empty cells.<br><br>
+        After a placement, every fully-filled square (2×2 and larger) that is
+        <em>horizontally or vertically mirror-symmetric</em> flips all its stones
+        to the placing player's color.<br><br>
+        Diagonal symmetry does <em>not</em> count. Multiple squares may flip per move.<br><br>
+        The board fills up. <strong>Most stones of your color wins.</strong>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Constants ────────────────────────────────────────────────────────────────
+const EMPTY = 0, WHITE = 1, BLACK = 2;
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let N = 8;
+let CELL, PAD;
+let board = [];
+let currentPlayer = WHITE;
+let gameOver = false;
+let isAnimating = false;
+
+// ─── Canvas ───────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+
+// ─── Board setup ──────────────────────────────────────────────────────────────
+function initBoard() {
+  board = Array.from({length: N}, () => Array(N).fill(EMPTY));
+}
+
+function setBoardSize(n) {
+  N = n;
+  document.querySelectorAll('.size-btns button').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn' + n).classList.add('active');
+  newGame();
+}
+
+function newGame() {
+  initBoard();
+  currentPlayer = WHITE;
+  gameOver = false;
+  isAnimating = false;
+  document.getElementById('winnerOverlay').classList.remove('show');
+  document.getElementById('logArea').innerHTML = '';
+  updateCellSize();
+  updateUI();
+  drawBoard();
+}
+
+function updateCellSize() {
+  const maxW = Math.min(window.innerWidth - 290, 640);
+  CELL = Math.floor(Math.min(maxW, 560) / N);
+  CELL = Math.max(CELL, 44);
+  PAD  = Math.round(CELL * 0.55);
+  const size = CELL * N + PAD * 2;
+  canvas.width  = size;
+  canvas.height = size;
+}
+
+// ─── Coordinate helpers ───────────────────────────────────────────────────────
+function cellCenter(r, c) {
+  return [PAD + c * CELL + CELL / 2, PAD + r * CELL + CELL / 2];
+}
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+function drawBoard(highlights) {
+  const size = canvas.width;
+
+  // Board background
+  ctx.fillStyle = '#cfc8bc';
+  ctx.fillRect(0, 0, size, size);
+
+  // Slight wood grain feel
+  ctx.fillStyle = '#c9c1b4';
+  for (let i = 0; i < size; i += 6) {
+    ctx.fillRect(0, i, size, 1);
+  }
+
+  // Square highlight backgrounds
+  if (highlights) {
+    highlights.filter(h => h.type === 'square').forEach(h => {
+      const x = PAD + h.c * CELL, y = PAD + h.r * CELL, w = h.size * CELL;
+      ctx.fillStyle = 'rgba(84,160,255,0.25)';
+      ctx.fillRect(x, y, w, w);
+    });
+  }
+
+  // Grid lines
+  ctx.strokeStyle = '#7a6f60';
+  ctx.lineWidth = 0.9;
+  for (let i = 0; i <= N; i++) {
+    const x = PAD + i * CELL;
+    ctx.beginPath(); ctx.moveTo(x, PAD); ctx.lineTo(x, PAD + N * CELL); ctx.stroke();
+    const y = PAD + i * CELL;
+    ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(PAD + N * CELL, y); ctx.stroke();
+  }
+
+  // Square highlight borders
+  if (highlights) {
+    highlights.filter(h => h.type === 'square').forEach(h => {
+      const x = PAD + h.c * CELL, y = PAD + h.r * CELL, w = h.size * CELL;
+      ctx.strokeStyle = '#54a0ff';
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(x + 1, y + 1, w - 2, w - 2);
+    });
+  }
+
+  // Stones
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      if (board[r][c] !== EMPTY)
+        drawStone(r, c, board[r][c], 1.0);
+
+  // Axis lines (on top of stones)
+  if (highlights) {
+    highlights.filter(h => h.type === 'axis').forEach(h => drawAxisLine(h));
+  }
+}
+
+function drawStone(r, c, color, alpha) {
+  const [x, y] = cellCenter(r, c);
+  const radius  = CELL * 0.38;
+
+  ctx.save();
+  ctx.globalAlpha = alpha !== undefined ? alpha : 1.0;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+
+  if (color === WHITE) {
+    const g = ctx.createRadialGradient(x - radius*0.28, y - radius*0.28, radius*0.04, x, y, radius);
+    g.addColorStop(0,   '#ffffff');
+    g.addColorStop(0.65,'#e8e8e8');
+    g.addColorStop(1,   '#bbb');
+    ctx.fillStyle = g;
+    ctx.shadowColor = 'rgba(0,0,0,0.35)';
+    ctx.shadowBlur  = 5;
+  } else {
+    const g = ctx.createRadialGradient(x - radius*0.28, y - radius*0.28, radius*0.04, x, y, radius);
+    g.addColorStop(0,   '#555');
+    g.addColorStop(0.5, '#222');
+    g.addColorStop(1,   '#000');
+    ctx.fillStyle = g;
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur  = 6;
+  }
+
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawAxisLine(h) {
+  // h: { axis:'H'|'V', frac:0..1, sq:{r,c,size} }
+  const sq = h.sq;
+  const x0 = PAD + sq.c * CELL;
+  const y0 = PAD + sq.r * CELL;
+  const w  = sq.size * CELL;
+
+  ctx.save();
+  ctx.setLineDash([7, 5]);
+  ctx.strokeStyle = '#1e90ff';
+  ctx.lineWidth   = 2.5;
+  ctx.shadowColor = '#54a0ff';
+  ctx.shadowBlur  = 8;
+
+  if (h.axis === 'H') {
+    const y = y0 + h.frac * w;
+    ctx.beginPath(); ctx.moveTo(x0 - 6, y); ctx.lineTo(x0 + w + 6, y); ctx.stroke();
+  } else {
+    const x = x0 + h.frac * w;
+    ctx.beginPath(); ctx.moveTo(x, y0 - 6); ctx.lineTo(x, y0 + w + 6); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ─── Symmetry detection ───────────────────────────────────────────────────────
+/**
+ * Returns array of axis descriptors {axis:'H'|'V', frac}
+ * frac is the position (0-1) within the square for the axis line.
+ */
+function getSymmetryAxes(r, c, size) {
+  const results = [];
+
+  // Horizontal (top ↔ bottom): row dr mirrors row (size-1-dr)
+  {
+    let sym = true;
+    outer: for (let dr = 0; dr < Math.floor(size / 2); dr++) {
+      for (let dc = 0; dc < size; dc++) {
+        if (board[r + dr][c + dc] !== board[r + size - 1 - dr][c + dc]) {
+          sym = false; break outer;
+        }
+      }
+    }
+    if (sym) results.push({axis: 'H', frac: 0.5});
+  }
+
+  // Vertical (left ↔ right): col dc mirrors col (size-1-dc)
+  {
+    let sym = true;
+    outer: for (let dc = 0; dc < Math.floor(size / 2); dc++) {
+      for (let dr = 0; dr < size; dr++) {
+        if (board[r + dr][c + dc] !== board[r + dr][c + size - 1 - dc]) {
+          sym = false; break outer;
+        }
+      }
+    }
+    if (sym) results.push({axis: 'V', frac: 0.5});
+  }
+
+  return results;
+}
+
+function isFull(r, c, size) {
+  for (let dr = 0; dr < size; dr++)
+    for (let dc = 0; dc < size; dc++)
+      if (board[r + dr][c + dc] === EMPTY) return false;
+  return true;
+}
+
+/**
+ * Find all squares that:
+ *   1. Contain cell (row, col)
+ *   2. Are fully filled
+ *   3. Are H- or V-symmetric
+ */
+function findTriggeredSymmetries(row, col) {
+  const found = [];
+  const seen  = new Set();
+
+  for (let size = 2; size <= N; size++) {
+    const rMin = Math.max(0, row - size + 1);
+    const rMax = Math.min(N - size, row);
+    const cMin = Math.max(0, col - size + 1);
+    const cMax = Math.min(N - size, col);
+
+    for (let r = rMin; r <= rMax; r++) {
+      for (let c = cMin; c <= cMax; c++) {
+        if (!isFull(r, c, size)) continue;
+        const axes = getSymmetryAxes(r, c, size);
+        if (axes.length === 0) continue;
+        const key = `${r},${c},${size}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          found.push({r, c, size, axes});
+        }
+      }
+    }
+  }
+  return found;
+}
+
+function colorSquare(sq, color) {
+  for (let dr = 0; dr < sq.size; dr++)
+    for (let dc = 0; dc < sq.size; dc++)
+      board[sq.r + dr][sq.c + dc] = color;
+}
+
+function countStones() {
+  let w = 0, b = 0;
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++) {
+      if (board[r][c] === WHITE) w++;
+      else if (board[r][c] === BLACK) b++;
+    }
+  return {w, b};
+}
+
+function isBoardFull() {
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      if (board[r][c] === EMPTY) return false;
+  return true;
+}
+
+// ─── Animation ────────────────────────────────────────────────────────────────
+
+/**
+ * Animate all triggered symmetry squares sequentially, then call done().
+ */
+function animateSymmetries(syms, placedColor, done) {
+  if (syms.length === 0) { done(); return; }
+  let idx = 0;
+  function next() {
+    if (idx >= syms.length) { done(); return; }
+    animateOneSym(syms[idx++], placedColor, next);
+  }
+  next();
+}
+
+function animateOneSym(sym, color, done) {
+  // Phase durations (ms)
+  const T_HIGHLIGHT = 350;  // show square outline
+  const T_AXIS      = 600;  // show axis line
+  const T_FLASH     = 500;  // flash stones to new color
+  const T_TOTAL     = T_HIGHLIGHT + T_AXIS + T_FLASH;
+
+  const sqHL  = [{type: 'square', r: sym.r, c: sym.c, size: sym.size}];
+  // Use first axis for the line (often only one, sometimes two - show first)
+  const axHL  = [{type: 'axis', axis: sym.axes[0].axis, frac: sym.axes[0].frac,
+                  sq: {r: sym.r, c: sym.c, size: sym.size}}];
+
+  const start = performance.now();
+
+  function tick(now) {
+    const t = now - start;
+
+    if (t < T_HIGHLIGHT) {
+      drawBoard(sqHL);
+    } else if (t < T_HIGHLIGHT + T_AXIS) {
+      drawBoard([...sqHL, ...axHL]);
+    } else if (t < T_TOTAL) {
+      // Flash phase: interpolate stone colors inside square
+      const p = (t - T_HIGHLIGHT - T_AXIS) / T_FLASH; // 0→1
+      // Pulse: show new color increasingly
+      const newAlpha = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(p * Math.PI)); // smooth 0→1
+
+      drawBoard([...sqHL, ...axHL]);
+      // Overdraw stones inside the square that will change
+      for (let dr = 0; dr < sym.size; dr++) {
+        for (let dc = 0; dc < sym.size; dc++) {
+          const rr = sym.r + dr, cc = sym.c + dc;
+          if (board[rr][cc] !== color) {
+            drawStone(rr, cc, board[rr][cc], 1 - newAlpha);
+            drawStone(rr, cc, color,         newAlpha);
+          }
+        }
+      }
+    } else {
+      // Commit color change
+      colorSquare(sym, color);
+      drawBoard();
+      done();
+      return;
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+}
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+
+canvas.addEventListener('click', function(e) {
+  if (gameOver || isAnimating) return;
+
+  const rect  = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
+
+  const col = Math.floor((mx - PAD) / CELL);
+  const row = Math.floor((my - PAD) / CELL);
+
+  if (row < 0 || row >= N || col < 0 || col >= N) return;
+  if (board[row][col] !== EMPTY) return;
+
+  // Place stone
+  board[row][col] = currentPlayer;
+  const placedColor = currentPlayer;
+  const colName     = currentPlayer === WHITE ? 'White' : 'Black';
+  const colLetter   = String.fromCharCode(65 + col);
+  addLog(`${colName} → ${colLetter}${row + 1}`, 'placed');
+
+  // Detect symmetries BEFORE any coloring
+  const syms = findTriggeredSymmetries(row, col);
+
+  syms.forEach(s => {
+    const axStr = s.axes.map(a => a.axis === 'H' ? 'horiz' : 'vert').join(' + ');
+    addLog(`  ↺ ${s.size}×${s.size} sym (${axStr}) → ${colName}`, 'symmetry');
+  });
+
+  if (syms.length > 0) {
+    isAnimating = true;
+    drawBoard(); // draw placed stone first
+    // small delay so the stone appears before animation starts
+    setTimeout(() => {
+      animateSymmetries(syms, placedColor, () => {
+        isAnimating = false;
+        switchTurn();
+        updateUI();
+        if (isBoardFull()) endGame();
+      });
+    }, 120);
+  } else {
+    drawBoard();
+    switchTurn();
+    updateUI();
+    if (isBoardFull()) endGame();
+  }
+});
+
+// Ghost stone on hover
+canvas.addEventListener('mousemove', function(e) {
+  if (gameOver || isAnimating) return;
+  const rect  = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
+  const col = Math.floor((mx - PAD) / CELL);
+  const row = Math.floor((my - PAD) / CELL);
+
+  drawBoard();
+  if (row >= 0 && row < N && col >= 0 && col < N && board[row][col] === EMPTY)
+    drawStone(row, col, currentPlayer, 0.32);
+});
+
+canvas.addEventListener('mouseleave', function() {
+  if (!isAnimating) drawBoard();
+});
+
+// ─── UI ───────────────────────────────────────────────────────────────────────
+
+function switchTurn() {
+  currentPlayer = currentPlayer === WHITE ? BLACK : WHITE;
+}
+
+function updateUI() {
+  const {w, b} = countStones();
+  document.getElementById('whiteScore').textContent = w;
+  document.getElementById('blackScore').textContent = b;
+  document.getElementById('stoneCount').textContent = `${w + b} / ${N * N} placed`;
+
+  const ts = document.getElementById('turnStone');
+  const tt = document.getElementById('turnText');
+  if (currentPlayer === WHITE) {
+    ts.style.background = '#f0f0f0'; ts.style.border = '2px solid #ccc';
+    tt.textContent = "White's turn";
+  } else {
+    ts.style.background = '#1a1a1a'; ts.style.border = '2px solid #555';
+    tt.textContent = "Black's turn";
+  }
+}
+
+function addLog(text, cls) {
+  const log = document.getElementById('logArea');
+  const div = document.createElement('div');
+  div.className = 'log-entry' + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function endGame() {
+  gameOver = true;
+  const {w, b} = countStones();
+  const overlay = document.getElementById('winnerOverlay');
+  overlay.classList.add('show');
+  if (w > b) {
+    document.getElementById('winnerText').textContent = 'White Wins!';
+    document.getElementById('winnerSub').textContent  = `White: ${w}  •  Black: ${b}`;
+  } else if (b > w) {
+    document.getElementById('winnerText').textContent = 'Black Wins!';
+    document.getElementById('winnerSub').textContent  = `Black: ${b}  •  White: ${w}`;
+  } else {
+    document.getElementById('winnerText').textContent = "It's a Draw!";
+    document.getElementById('winnerSub').textContent  = `Both players: ${w} stones`;
+  }
+}
+
+function toggleRules() {
+  document.getElementById('rulesText').classList.toggle('show');
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+window.addEventListener('resize', () => {
+  updateCellSize();
+  drawBoard();
+});
+
+newGame();
+</script>
+</body>
+</html>
