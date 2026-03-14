@@ -468,50 +468,98 @@ function isBoardFull() {
   return true;
 }
 
+// ─── Animation helpers ────────────────────────────────────────────────────────
+
+/** True when every cell in the square is already `color`. */
+function squareAlreadyFilled(sym, color) {
+  for (let dr = 0; dr < sym.size; dr++)
+    for (let dc = 0; dc < sym.size; dc++)
+      if (board[sym.r + dr][sym.c + dc] !== color) return false;
+  return true;
+}
+
+/**
+ * Remove any square that is fully contained inside a strictly larger square
+ * in the same list. Only the outermost (largest enclosing) squares are kept.
+ */
+function removeContained(syms) {
+  return syms.filter((a, i) =>
+    !syms.some((b, j) =>
+      i !== j &&
+      b.size > a.size &&
+      b.r <= a.r && b.c <= a.c &&
+      b.r + b.size >= a.r + a.size &&
+      b.c + b.size >= a.c + a.size
+    )
+  );
+}
+
+/** Build the canvas highlight descriptors for one symmetry square. */
+function makeHighlights(sym) {
+  return {
+    sq:   {type: 'square', r: sym.r, c: sym.c, size: sym.size},
+    axis: {type: 'axis', axis: sym.axes[0].axis, frac: sym.axes[0].frac,
+           sq: {r: sym.r, c: sym.c, size: sym.size}}
+  };
+}
+
 // ─── Animation ────────────────────────────────────────────────────────────────
 
 /**
- * Animate all triggered symmetry squares sequentially, then call done().
+ * Main entry point for symmetry animation after a move.
+ *
+ * Rules applied here:
+ *  1. Squares already entirely the placed color are skipped (no visual change).
+ *  2. Smaller squares fully contained inside a larger symmetric square are
+ *     suppressed – only the outermost square is highlighted.
+ *  3. Single square  → highlight then flash (original flow).
+ *     Multiple squares → highlight each one-by-one, THEN flash all together.
  */
 function animateSymmetries(syms, placedColor, done) {
-  if (syms.length === 0) { done(); return; }
-  let idx = 0;
-  function next() {
-    if (idx >= syms.length) { done(); return; }
-    animateOneSym(syms[idx++], placedColor, next);
+  // Step 1: remove contained squares
+  const outermost = removeContained(syms);
+
+  // Step 2: separate those that actually change color from no-ops
+  const toAnimate  = outermost.filter(s => !squareAlreadyFilled(s, placedColor));
+  const noChange   = outermost.filter(s =>  squareAlreadyFilled(s, placedColor));
+
+  // No-op squares: color is already correct, nothing to do.
+  // (colorSquare would be a no-op anyway, so we skip it.)
+
+  if (toAnimate.length === 0) {
+    done();
+    return;
   }
-  next();
+
+  if (toAnimate.length === 1) {
+    animateOneSym(toAnimate[0], placedColor, done);
+  } else {
+    animateMultiSym(toAnimate, placedColor, done);
+  }
 }
 
+// ── Single-square animation (unchanged behaviour) ──────────────────────────
+
 function animateOneSym(sym, color, done) {
-  // Phase durations (ms)
-  const T_HIGHLIGHT = 350;  // show square outline
-  const T_AXIS      = 600;  // show axis line
-  const T_FLASH     = 500;  // flash stones to new color
-  const T_TOTAL     = T_HIGHLIGHT + T_AXIS + T_FLASH;
+  const T_HIGHLIGHT = 350;
+  const T_AXIS      = 600;
+  const T_FLASH     = 500;
 
-  const sqHL  = [{type: 'square', r: sym.r, c: sym.c, size: sym.size}];
-  // Use first axis for the line (often only one, sometimes two - show first)
-  const axHL  = [{type: 'axis', axis: sym.axes[0].axis, frac: sym.axes[0].frac,
-                  sq: {r: sym.r, c: sym.c, size: sym.size}}];
-
+  const {sq: sqHL, axis: axHL} = makeHighlights(sym);
   const start = performance.now();
 
   function tick(now) {
     const t = now - start;
 
     if (t < T_HIGHLIGHT) {
-      drawBoard(sqHL);
+      drawBoard([sqHL]);
     } else if (t < T_HIGHLIGHT + T_AXIS) {
-      drawBoard([...sqHL, ...axHL]);
-    } else if (t < T_TOTAL) {
-      // Flash phase: interpolate stone colors inside square
-      const p = (t - T_HIGHLIGHT - T_AXIS) / T_FLASH; // 0→1
-      // Pulse: show new color increasingly
-      const newAlpha = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(p * Math.PI)); // smooth 0→1
+      drawBoard([sqHL, axHL]);
+    } else if (t < T_HIGHLIGHT + T_AXIS + T_FLASH) {
+      const p        = (t - T_HIGHLIGHT - T_AXIS) / T_FLASH;
+      const newAlpha = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(p * Math.PI));
 
-      drawBoard([...sqHL, ...axHL]);
-      // Overdraw stones inside the square that will change
+      drawBoard([sqHL, axHL]);
       for (let dr = 0; dr < sym.size; dr++) {
         for (let dc = 0; dc < sym.size; dc++) {
           const rr = sym.r + dr, cc = sym.c + dc;
@@ -522,7 +570,6 @@ function animateOneSym(sym, color, done) {
         }
       }
     } else {
-      // Commit color change
       colorSquare(sym, color);
       drawBoard();
       done();
@@ -533,6 +580,78 @@ function animateOneSym(sym, color, done) {
   }
 
   requestAnimationFrame(tick);
+}
+
+// ── Multi-square animation: highlight each in turn, then flash all ──────────
+
+function animateMultiSym(syms, color, done) {
+  const T_SQ   = 350;   // square outline only
+  const T_AXIS = 600;   // + axis line
+  const T_FLASH = 550;  // simultaneous color-change flash for all squares
+
+  let idx = 0;
+
+  // Phase A: show each square's highlight + axis sequentially
+  function highlightNext() {
+    if (idx >= syms.length) { flashAll(); return; }
+
+    const {sq: sqHL, axis: axHL} = makeHighlights(syms[idx++]);
+    const start = performance.now();
+
+    function tick(now) {
+      const t = now - start;
+      if (t < T_SQ) {
+        drawBoard([sqHL]);
+        requestAnimationFrame(tick);
+      } else if (t < T_SQ + T_AXIS) {
+        drawBoard([sqHL, axHL]);
+        requestAnimationFrame(tick);
+      } else {
+        drawBoard();   // clear before next square's highlight
+        highlightNext();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // Phase B: show ALL squares + flash color change simultaneously
+  function flashAll() {
+    const allHL = syms.flatMap(sym => {
+      const {sq, axis} = makeHighlights(sym);
+      return [sq, axis];
+    });
+
+    const start = performance.now();
+
+    function tick(now) {
+      const t = now - start;
+      if (t < T_FLASH) {
+        const p        = t / T_FLASH;
+        const newAlpha = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(p * Math.PI));
+
+        drawBoard(allHL);
+        syms.forEach(sym => {
+          for (let dr = 0; dr < sym.size; dr++) {
+            for (let dc = 0; dc < sym.size; dc++) {
+              const rr = sym.r + dr, cc = sym.c + dc;
+              if (board[rr][cc] !== color) {
+                drawStone(rr, cc, board[rr][cc], 1 - newAlpha);
+                drawStone(rr, cc, color,         newAlpha);
+              }
+            }
+          }
+        });
+        requestAnimationFrame(tick);
+      } else {
+        syms.forEach(sym => colorSquare(sym, color));
+        drawBoard();
+        done();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  highlightNext();
 }
 
 // ─── Input ────────────────────────────────────────────────────────────────────
@@ -560,19 +679,22 @@ canvas.addEventListener('click', function(e) {
   addLog(`${colName} → ${colLetter}${row + 1}`, 'placed');
 
   // Detect symmetries BEFORE any coloring
-  const syms = findTriggeredSymmetries(row, col);
+  const rawSyms    = findTriggeredSymmetries(row, col);
+  // Apply same filters as animateSymmetries so log matches what will be shown
+  const outerSyms  = removeContained(rawSyms);
+  const animSyms   = outerSyms.filter(s => !squareAlreadyFilled(s, placedColor));
 
-  syms.forEach(s => {
+  animSyms.forEach(s => {
     const axStr = s.axes.map(a => a.axis === 'H' ? 'horiz' : 'vert').join(' + ');
     addLog(`  ↺ ${s.size}×${s.size} sym (${axStr}) → ${colName}`, 'symmetry');
   });
 
-  if (syms.length > 0) {
+  if (animSyms.length > 0) {
     isAnimating = true;
     drawBoard(); // draw placed stone first
     // small delay so the stone appears before animation starts
     setTimeout(() => {
-      animateSymmetries(syms, placedColor, () => {
+      animateSymmetries(rawSyms, placedColor, () => {
         isAnimating = false;
         switchTurn();
         updateUI();
