@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Symmetry - The Board Game</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -19,17 +22,25 @@
   }
 
   h1 {
-    font-size: 2rem;
-    margin-bottom: 6px;
-    letter-spacing: 2px;
-    color: #c8d6e5;
+    font-family: 'Futura', 'Josefin Sans', 'Century Gothic', 'Trebuchet MS', sans-serif;
+    font-size: 2.6rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+    letter-spacing: 6px;
+    color: #ffffff;
+    text-transform: uppercase;
   }
 
+  h1 .blue-m { color: #54a0ff; }
+
   .subtitle {
-    font-size: 0.85rem;
-    color: #8395a7;
-    margin-bottom: 18px;
-    letter-spacing: 1px;
+    font-family: 'Futura', 'Josefin Sans', 'Century Gothic', 'Trebuchet MS', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 400;
+    color: #ffffff;
+    margin-bottom: 20px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
   }
 
   .game-area {
@@ -87,16 +98,6 @@
   .turn-stone { width: 26px; height: 26px; border-radius: 50%; transition: all 0.3s; }
   .turn-text  { font-size: 0.95rem; color: #c8d6e5; }
 
-  .log-area {
-    max-height: 180px; overflow-y: auto;
-    font-size: 0.78rem; color: #8395a7; line-height: 1.6;
-  }
-  .log-area::-webkit-scrollbar { width: 4px; }
-  .log-area::-webkit-scrollbar-track { background: #0f3460; }
-  .log-area::-webkit-scrollbar-thumb { background: #1a4a7a; border-radius: 2px; }
-  .log-entry { padding: 2px 0; border-bottom: 1px solid #0a2040; }
-  .log-entry.placed   { color: #c8d6e5; }
-  .log-entry.symmetry { color: #ffd32a; }
 
   button {
     background: #0f3460; color: #c8d6e5; border: 1px solid #1a4a7a;
@@ -159,8 +160,8 @@
 </head>
 <body>
 
-<h1>SYMMETRY</h1>
-<p class="subtitle">Abstract Territory Board Game</p>
+<h1>SY<span class="blue-m">MM</span>ETRY</h1>
+<p class="subtitle">The Board Game</p>
 
 <div class="game-area">
   <div class="board-wrapper">
@@ -231,11 +232,6 @@
     </div>
 
     <div class="panel">
-      <h3>Move Log</h3>
-      <div class="log-area" id="logArea"></div>
-    </div>
-
-    <div class="panel">
       <button class="rules-btn" onclick="toggleRules()">Show / Hide Rules</button>
       <div class="rules-text" id="rulesText">
         <strong>White starts.</strong> Players alternate placing stones on empty cells.<br><br>
@@ -292,7 +288,6 @@ function newGame() {
   gameOver      = false;
   isAnimating   = false;
   document.getElementById('winnerOverlay').classList.remove('show');
-  document.getElementById('logArea').innerHTML = '';
   setThinking(false);
   updateCellSize();
   updateUI();
@@ -618,27 +613,18 @@ function animateMultiSym(syms, color, done) {
 
 // ─── Move execution (shared by human and AI) ─────────────────────────────────
 
-function executeMove(row, col) {
+function executeMove(row, col, isHumanMove = false) {
   board[row][col] = currentPlayer;
   const placedColor = currentPlayer;
-  const colName     = currentPlayer === WHITE ? 'White' : 'Black';
-  const colLetter   = String.fromCharCode(65 + col);
-  addLog(`${colName} → ${colLetter}${row + 1}`, 'placed');
 
-  const rawSyms   = findTriggeredSymmetries(row, col);
-  const outerSyms = removeContained(rawSyms);
-  const animSyms  = outerSyms.filter(s => !squareAlreadyFilled(s, placedColor));
-
-  animSyms.forEach(s => {
-    const axStr = s.axes.map(a => a.axis === 'H' ? 'horiz' : 'vert').join(' + ');
-    addLog(`  ↺ ${s.size}×${s.size} sym (${axStr}) → ${colName}`, 'symmetry');
-  });
+  const rawSyms  = findTriggeredSymmetries(row, col);
+  const animSyms = removeContained(rawSyms).filter(s => !squareAlreadyFilled(s, placedColor));
 
   const afterMove = () => {
     switchTurn();
     updateUI();
     if (isBoardFull()) { endGame(); return; }
-    triggerAIMove();
+    triggerAIMove(isHumanMove ? 2000 : 0);
   };
 
   if (animSyms.length > 0) {
@@ -671,7 +657,7 @@ canvas.addEventListener('click', function(e) {
   if (row < 0 || row >= N || col < 0 || col >= N) return;
   if (board[row][col] !== EMPTY) return;
 
-  executeMove(row, col);
+  executeMove(row, col, true);
 });
 
 canvas.addEventListener('mousemove', function(e) {
@@ -782,16 +768,17 @@ function getBestMove() {
   return bestMove;
 }
 
-function triggerAIMove() {
+function triggerAIMove(delay = 0) {
   if (!aiEnabled || currentPlayer !== aiColor || gameOver || isAnimating) return;
 
   setThinking(true);
-  // Yield to the browser so UI updates (thinking indicator) before blocking search
+  // Respect the requested delay (≥2 s after a human move), then yield briefly
+  // before the blocking search so the thinking indicator has time to render.
   setTimeout(() => {
     const [row, col] = getBestMove();
     setThinking(false);
-    executeMove(row, col);
-  }, 30);
+    executeMove(row, col, false);
+  }, Math.max(delay, 30));
 }
 
 // ─── AI UI controls ───────────────────────────────────────────────────────────
@@ -836,14 +823,6 @@ function updateUI() {
   }
 }
 
-function addLog(text, cls) {
-  const log = document.getElementById('logArea');
-  const div = document.createElement('div');
-  div.className = 'log-entry' + (cls ? ' ' + cls : '');
-  div.textContent = text;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
-}
 
 function endGame() {
   gameOver = true;
