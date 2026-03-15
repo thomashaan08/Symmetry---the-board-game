@@ -299,6 +299,7 @@ const AI_PENALTIES = { novice: 4, beginner: 3, intermediate: 2, advanced: 1, exp
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
 const ctx    = canvas.getContext('2d');
+let canvasDPR = 1; // device pixel ratio — updated in updateCellSize()
 
 // ─── Board setup ──────────────────────────────────────────────────────────────
 function initBoard() {
@@ -331,13 +332,18 @@ function newGame() {
 }
 
 function updateCellSize() {
+  canvasDPR = window.devicePixelRatio || 1;
   const maxW = Math.min(window.innerWidth - 290, 640);
   CELL = Math.floor(Math.min(maxW, 560) / N);
   CELL = Math.max(CELL, 44);
   PAD  = Math.round(CELL * 0.55);
-  const size = CELL * N + PAD * 2;
-  canvas.width  = size;
-  canvas.height = size;
+  const cssSize = CELL * N + PAD * 2;
+  // High-DPI drawing buffer for crisp Retina rendering
+  canvas.width  = Math.round(cssSize * canvasDPR);
+  canvas.height = Math.round(cssSize * canvasDPR);
+  // Pin the CSS display size so the canvas doesn't stretch
+  canvas.style.width  = cssSize + 'px';
+  canvas.style.height = cssSize + 'px';
 }
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────
@@ -347,7 +353,9 @@ function cellCenter(r, c) {
 
 // ─── Drawing ──────────────────────────────────────────────────────────────────
 function drawBoard(highlights) {
-  const size = canvas.width;
+  // Scale drawing operations to physical pixels; CELL/PAD stay in logical (CSS) pixels.
+  ctx.setTransform(canvasDPR, 0, 0, canvasDPR, 0, 0);
+  const size = CELL * N + PAD * 2;  // logical size
 
   ctx.fillStyle = '#969a9c';
   ctx.fillRect(0, 0, size, size);
@@ -662,11 +670,10 @@ canvas.addEventListener('click', function(e) {
   if (gameOver || isAnimating) return;
   if (aiEnabled && currentPlayer === aiColor) return;  // AI's turn – block human
 
-  const rect   = canvas.getBoundingClientRect();
-  const scaleX = canvas.width  / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const col    = Math.floor(((e.clientX - rect.left) * scaleX - PAD) / CELL);
-  const row    = Math.floor(((e.clientY - rect.top)  * scaleY - PAD) / CELL);
+  // Work in CSS pixel space — PAD and CELL are logical (CSS) pixels
+  const rect = canvas.getBoundingClientRect();
+  const col  = Math.floor(((e.clientX - rect.left) - PAD) / CELL);
+  const row  = Math.floor(((e.clientY - rect.top)  - PAD) / CELL);
 
   if (row < 0 || row >= N || col < 0 || col >= N) return;
   if (board[row][col] !== EMPTY) return;
@@ -678,11 +685,9 @@ canvas.addEventListener('mousemove', function(e) {
   if (gameOver || isAnimating) return;
   if (aiEnabled && currentPlayer === aiColor) return;
 
-  const rect   = canvas.getBoundingClientRect();
-  const scaleX = canvas.width  / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const col    = Math.floor(((e.clientX - rect.left) * scaleX - PAD) / CELL);
-  const row    = Math.floor(((e.clientY - rect.top)  * scaleY - PAD) / CELL);
+  const rect = canvas.getBoundingClientRect();
+  const col  = Math.floor(((e.clientX - rect.left) - PAD) / CELL);
+  const row  = Math.floor(((e.clientY - rect.top)  - PAD) / CELL);
 
   drawBoard();
   if (row >= 0 && row < N && col >= 0 && col < N && board[row][col] === EMPTY)
