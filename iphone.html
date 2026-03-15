@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Symmetry - The Board Game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -63,8 +62,11 @@
     cursor: pointer;
     border-radius: 6px;
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-    /* Removes the 300 ms iOS tap delay and prevents accidental zoom */
-    touch-action: manipulation;
+    /* Give JS full control over all touch input on the canvas */
+    touch-action: none;
+    /* Safety net: never let the canvas overflow the viewport */
+    max-width: 100%;
+    max-height: 100vw;
   }
 
   .winner-overlay {
@@ -381,6 +383,7 @@ const AI_PENALTIES = { novice: 4, beginner: 3, intermediate: 2, advanced: 1, exp
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
 const ctx    = canvas.getContext('2d');
+let canvasDPR = 1; // device pixel ratio — updated in updateCellSize()
 
 // ─── Inline Web Worker for non-blocking AI ───────────────────────────────────
 // The worker contains a self-contained copy of the game logic needed for minimax.
@@ -592,14 +595,25 @@ function newGame() {
 }
 
 function updateCellSize() {
-  // Use the full available width minus small padding; cap at 500px
-  const available = Math.min(window.innerWidth - 20, 500);
-  CELL = Math.floor(available / N);
-  CELL = Math.max(CELL, 36);
+  canvasDPR = window.devicePixelRatio || 1;
+
+  // Body has 10 px padding each side, so the usable CSS width is innerWidth-20.
+  // Canvas logical size = CELL*N + PAD*2, with PAD ≈ 0.45*CELL
+  //   → size ≈ CELL*(N + 0.9)  → CELL = floor(available / (N + 0.9))
+  // This ensures the canvas never overflows the viewport.
+  const available = Math.min(window.innerWidth - 20, 480);
+  CELL = Math.floor(available / (N + 0.9));
+  CELL = Math.max(CELL, 30);
   PAD  = Math.round(CELL * 0.45);
-  const size = CELL * N + PAD * 2;
-  canvas.width  = size;
-  canvas.height = size;
+  const cssSize = CELL * N + PAD * 2;   // logical (CSS) pixels
+
+  // High-DPI drawing buffer — multiplied by DPR for crisp Retina rendering.
+  canvas.width  = Math.round(cssSize * canvasDPR);
+  canvas.height = Math.round(cssSize * canvasDPR);
+
+  // Explicitly pin the CSS display size so the canvas never stretches.
+  canvas.style.width  = cssSize + 'px';
+  canvas.style.height = cssSize + 'px';
 }
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────
@@ -609,7 +623,10 @@ function cellCenter(r, c) {
 
 // ─── Drawing ──────────────────────────────────────────────────────────────────
 function drawBoard(highlights) {
-  const size = canvas.width;
+  // Scale all drawing operations to physical pixels so CELL/PAD remain in
+  // logical (CSS) pixels and Retina displays render crisply.
+  ctx.setTransform(canvasDPR, 0, 0, canvasDPR, 0, 0);
+  const size = CELL * N + PAD * 2;  // logical size
   ctx.fillStyle = '#969a9c';
   ctx.fillRect(0, 0, size, size);
 
@@ -894,13 +911,12 @@ function executeMove(row, col, isHumanMove = false) {
 
 // ─── Touch / Click input ──────────────────────────────────────────────────────
 // Returns [row, col] from a client coordinate, or null if out of bounds.
+// Works entirely in CSS (logical) pixel space — PAD and CELL are logical px,
+// getBoundingClientRect() returns logical px, and clientX/Y are logical px.
 function clientToCell(clientX, clientY) {
-  const rect   = canvas.getBoundingClientRect();
-  // Scale from CSS pixels to canvas pixels
-  const scaleX = canvas.width  / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const col = Math.floor(((clientX - rect.left) * scaleX - PAD) / CELL);
-  const row = Math.floor(((clientY - rect.top)  * scaleY - PAD) / CELL);
+  const rect = canvas.getBoundingClientRect();
+  const col = Math.floor(((clientX - rect.left) - PAD) / CELL);
+  const row = Math.floor(((clientY - rect.top)  - PAD) / CELL);
   if (row < 0 || row >= N || col < 0 || col >= N) return null;
   return [row, col];
 }
@@ -915,15 +931,21 @@ function handleTap(clientX, clientY) {
   executeMove(row, col, true);
 }
 
-// Touch events — use touchend for a responsive feel without 300 ms delay.
-// preventDefault() stops the browser from also firing a click event.
-canvas.addEventListener('touchend', function(e) {
+// Claim the touch from iOS immediately so it can't be hijacked as a scroll or
+// zoom gesture.  touch-action:none in CSS does the same at the CSS level, but
+// e.preventDefault() in touchstart is the belt-and-suspenders guarantee.
+canvas.addEventListener('touchstart', function(e) {
   e.preventDefault();
+}, { passive: false });
+
+// Fire the move on touchend for a snappy, zero-delay feel.
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault(); // also blocks the subsequent synthetic click event
   const touch = e.changedTouches[0];
   handleTap(touch.clientX, touch.clientY);
 }, { passive: false });
 
-// Keep click as a fallback for hybrid/desktop devices.
+// Fallback for non-touch (desktop/simulator) environments.
 canvas.addEventListener('click', function(e) {
   handleTap(e.clientX, e.clientY);
 });
