@@ -39,6 +39,8 @@
     color: #eee;
     /* Prevent bounce-scroll revealing the background on iOS              */
     overscroll-behavior-y: none;
+    /* Prevent canvas overflow from creating a horizontal scrollbar / clipping */
+    overflow-x: hidden;
   }
 
   /* ── Typography ──────────────────────────────────────────────────────────── */
@@ -426,12 +428,21 @@ function newGame() {
 function updateCellSize() {
   canvasDPR = window.devicePixelRatio || 1;
 
-  // Use full available screen width minus horizontal safe-area padding.
-  // We read the body's actual clientWidth which already accounts for padding.
-  var availW = document.body.clientWidth;
-  CELL = Math.floor(availW / N);
-  CELL = Math.max(CELL, 36);           // never smaller than 36 px logical
-  PAD  = Math.round(CELL * 0.45);
+  // window.innerWidth is reliable at any point after DOMContentLoaded on iOS.
+  // document.body.clientWidth is NOT safe here — it returns 0 on iOS Safari
+  // during initial load before layout has been committed.
+  // Subtract 24 px for the fixed 12 px left + 12 px right body padding.
+  var vw     = window.innerWidth || document.documentElement.clientWidth || 375;
+  var availW = vw - 24;
+
+  // Solve CELL so the full canvas (board + padding on both sides) fits in availW.
+  // cssSize = CELL * N + 2 * PAD  where PAD = CELL * padRatio
+  //   => cssSize = CELL * (N + 2 * padRatio) <= availW
+  //   => CELL <= availW / (N + 2 * padRatio)
+  var padRatio = 0.4;
+  CELL = Math.floor(availW / (N + 2 * padRatio));
+  CELL = Math.max(CELL, 32);           // never smaller than 32 px logical
+  PAD  = Math.round(CELL * padRatio);
 
   var cssSize = CELL * N + PAD * 2;
 
@@ -980,7 +991,14 @@ window.addEventListener('orientationchange', function() {
   setTimeout(function() { updateCellSize(); drawBoard(); }, 100);
 });
 
-newGame();
+// Defer the very first render until the browser has finished its initial layout
+// pass. On iOS Safari, window.innerWidth can be stale if read synchronously
+// at parse time (before the first layout flush).
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() { setTimeout(newGame, 0); });
+} else {
+  setTimeout(newGame, 0);
+}
 </script>
 </body>
 </html>
