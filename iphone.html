@@ -52,7 +52,10 @@
   /* ── Board ─────────────────────────────────────────────── */
   .board-wrapper {
     position: relative;
-    /* centres the canvas and keeps the overlay aligned */
+    /* Give the wrapper an explicit width so percentage constraints on the
+       canvas resolve correctly on iOS Safari */
+    width: 100%;
+    max-width: 500px;
     display: flex;
     justify-content: center;
   }
@@ -64,9 +67,6 @@
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
     /* Give JS full control over all touch input on the canvas */
     touch-action: none;
-    /* Safety net: never let the canvas overflow the viewport */
-    max-width: 100%;
-    max-height: 100vw;
   }
 
   .winner-overlay {
@@ -383,7 +383,6 @@ const AI_PENALTIES = { novice: 4, beginner: 3, intermediate: 2, advanced: 1, exp
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
 const ctx    = canvas.getContext('2d');
-let canvasDPR = 1; // device pixel ratio — updated in updateCellSize()
 
 // ─── Inline Web Worker for non-blocking AI ───────────────────────────────────
 // The worker contains a self-contained copy of the game logic needed for minimax.
@@ -595,25 +594,20 @@ function newGame() {
 }
 
 function updateCellSize() {
-  canvasDPR = window.devicePixelRatio || 1;
-
-  // Body has 10 px padding each side, so the usable CSS width is innerWidth-20.
-  // Canvas logical size = CELL*N + PAD*2, with PAD ≈ 0.45*CELL
-  //   → size ≈ CELL*(N + 0.9)  → CELL = floor(available / (N + 0.9))
-  // This ensures the canvas never overflows the viewport.
-  const available = Math.min(window.innerWidth - 20, 480);
-  CELL = Math.floor(available / (N + 0.9));
-  CELL = Math.max(CELL, 30);
+  // Use clientWidth of the document element as the most reliable viewport
+  // width on iOS Safari (window.innerWidth can be 0 during early page load).
+  const vw = document.documentElement.clientWidth || window.innerWidth || 375;
+  const available = Math.min(vw - 20, 480);
+  const rawCell = Math.floor(available / (N + 0.9));
+  CELL = (isFinite(rawCell) && rawCell >= 30) ? rawCell : 30;
   PAD  = Math.round(CELL * 0.45);
-  const cssSize = CELL * N + PAD * 2;   // logical (CSS) pixels
+  const size = CELL * N + PAD * 2;
 
-  // High-DPI drawing buffer — multiplied by DPR for crisp Retina rendering.
-  canvas.width  = Math.round(cssSize * canvasDPR);
-  canvas.height = Math.round(cssSize * canvasDPR);
-
-  // Explicitly pin the CSS display size so the canvas never stretches.
-  canvas.style.width  = cssSize + 'px';
-  canvas.style.height = cssSize + 'px';
+  // 1:1 canvas-to-CSS pixel mapping for maximum iOS compatibility.
+  canvas.width  = size;
+  canvas.height = size;
+  canvas.style.width  = size + 'px';
+  canvas.style.height = size + 'px';
 }
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────
@@ -623,10 +617,7 @@ function cellCenter(r, c) {
 
 // ─── Drawing ──────────────────────────────────────────────────────────────────
 function drawBoard(highlights) {
-  // Scale all drawing operations to physical pixels so CELL/PAD remain in
-  // logical (CSS) pixels and Retina displays render crisply.
-  ctx.setTransform(canvasDPR, 0, 0, canvasDPR, 0, 0);
-  const size = CELL * N + PAD * 2;  // logical size
+  const size = CELL * N + PAD * 2;
   ctx.fillStyle = '#969a9c';
   ctx.fillRect(0, 0, size, size);
 
@@ -1036,7 +1027,9 @@ function toggleRules() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('resize', () => { updateCellSize(); drawBoard(); });
 
-newGame();
+// Defer first paint until the page is fully laid out so that
+// clientWidth / innerWidth return real viewport dimensions on iOS.
+window.addEventListener('load', newGame);
 </script>
 </body>
 </html>
