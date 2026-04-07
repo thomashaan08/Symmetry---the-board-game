@@ -177,6 +177,17 @@
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
     40%           { transform: scale(1.1); opacity: 1;   }
   }
+
+  /* Reserve mode */
+  .reserve-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .reserve-label { font-size: 0.78rem; color: #8395a7; flex: 1; }
+  .reserve-num { font-size: 1rem; font-weight: bold; color: #54a0ff; }
+  .reserve-empty { color: #e55039; }
+
+  /* Mode buttons — three across */
+  .mode-btns { display: flex; gap: 6px; }
+  .mode-btns button { flex: 1; padding: 7px 4px; font-size: 0.76rem; }
+  .mode-btns button.active { background: #54a0ff; color: #fff; border-color: #54a0ff; }
 </style>
 </head>
 <body>
@@ -247,6 +258,27 @@
     </div>
 
     <div class="panel">
+      <h3>Game Mode</h3>
+      <div class="mode-btns">
+        <button onclick="setGameMode('standard')" id="btnModeStd" class="active">Standard</button>
+        <button onclick="setGameMode('reserve')"  id="btnModeRes">Reserve</button>
+        <button onclick="setGameMode('connect4')" id="btnModeC4">Connect4</button>
+      </div>
+      <div id="reserveInfo" style="display:none; margin-top:4px;">
+        <div class="reserve-row">
+          <div class="stone-icon white"></div>
+          <span class="reserve-label">White</span>
+          <span class="reserve-num" id="whiteReserveNum">0</span>
+        </div>
+        <div class="reserve-row">
+          <div class="stone-icon black"></div>
+          <span class="reserve-label">Black</span>
+          <span class="reserve-num" id="blackReserveNum">0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <h3>Board Size</h3>
       <div class="size-btns">
         <button onclick="setBoardSize(6)"  id="btn6">6×6</button>
@@ -286,6 +318,11 @@ let currentPlayer = WHITE;
 let gameOver      = false;
 let isAnimating   = false;
 
+// ─── Game mode ────────────────────────────────────────────────────────────────
+let gameMode = 'standard'; // 'standard' | 'reserve' | 'connect4'
+let whiteReserve = 0;
+let blackReserve = 0;
+
 // ─── AI state ─────────────────────────────────────────────────────────────────
 let aiEnabled   = false;
 let aiColor     = BLACK;   // which color the AI plays (default: Black)
@@ -320,6 +357,14 @@ function newGame() {
   currentPlayer = WHITE;
   gameOver      = false;
   isAnimating   = false;
+  // Reserve mode: each player gets ~1/3 of the board in stones
+  if (gameMode === 'reserve') {
+    const count = Math.max(4, Math.round(N * N / 3));
+    whiteReserve = count;
+    blackReserve = count;
+  } else {
+    whiteReserve = blackReserve = 0;
+  }
   document.getElementById('winnerOverlay').classList.remove('show');
   setThinking(false);
   updateCellSize();
@@ -637,6 +682,11 @@ function animateMultiSym(syms, color, done) {
 
 function executeMove(row, col, isHumanMove = false) {
   board[row][col] = currentPlayer;
+  // Decrement reserve before switching turn
+  if (gameMode === 'reserve') {
+    if (currentPlayer === WHITE) whiteReserve--;
+    else blackReserve--;
+  }
   const placedColor = currentPlayer;
 
   const rawSyms  = findTriggeredSymmetries(row, col);
@@ -646,6 +696,11 @@ function executeMove(row, col, isHumanMove = false) {
     switchTurn();
     updateUI();
     if (isBoardFull()) { endGame(); return; }
+    // Reserve mode: if next player has no stones left, end the game
+    if (gameMode === 'reserve') {
+      const nextReserve = currentPlayer === WHITE ? whiteReserve : blackReserve;
+      if (nextReserve <= 0) { endGame(); return; }
+    }
     triggerAIMove(isHumanMove ? 2000 : 0);
   };
 
@@ -669,14 +724,30 @@ function executeMove(row, col, isHumanMove = false) {
 canvas.addEventListener('click', function(e) {
   if (gameOver || isAnimating) return;
   if (aiEnabled && currentPlayer === aiColor) return;  // AI's turn – block human
+  // Reserve mode: block if current player is out of stones
+  if (gameMode === 'reserve') {
+    const myReserve = currentPlayer === WHITE ? whiteReserve : blackReserve;
+    if (myReserve <= 0) return;
+  }
 
   // Work in CSS pixel space — PAD and CELL are logical (CSS) pixels
   const rect = canvas.getBoundingClientRect();
   const col  = Math.floor(((e.clientX - rect.left) - PAD) / CELL);
-  const row  = Math.floor(((e.clientY - rect.top)  - PAD) / CELL);
 
-  if (row < 0 || row >= N || col < 0 || col >= N) return;
-  if (board[row][col] !== EMPTY) return;
+  let row;
+  if (gameMode === 'connect4') {
+    // Gravity: stone falls to the lowest empty row in this column
+    if (col < 0 || col >= N) return;
+    row = -1;
+    for (let r = N - 1; r >= 0; r--) {
+      if (board[r][col] === EMPTY) { row = r; break; }
+    }
+    if (row === -1) return; // column full
+  } else {
+    row = Math.floor(((e.clientY - rect.top) - PAD) / CELL);
+    if (row < 0 || row >= N || col < 0 || col >= N) return;
+    if (board[row][col] !== EMPTY) return;
+  }
 
   executeMove(row, col, true);
 });
@@ -687,20 +758,65 @@ canvas.addEventListener('mousemove', function(e) {
 
   const rect = canvas.getBoundingClientRect();
   const col  = Math.floor(((e.clientX - rect.left) - PAD) / CELL);
-  const row  = Math.floor(((e.clientY - rect.top)  - PAD) / CELL);
 
   drawBoard();
-  if (row >= 0 && row < N && col >= 0 && col < N && board[row][col] === EMPTY)
-    drawStone(row, col, currentPlayer, 0.32);
+
+  if (gameMode === 'connect4') {
+    if (col >= 0 && col < N) {
+      // Find the drop target row
+      let row = -1;
+      for (let r = N - 1; r >= 0; r--) {
+        if (board[r][col] === EMPTY) { row = r; break; }
+      }
+      if (row !== -1) drawStone(row, col, currentPlayer, 0.32);
+    }
+  } else {
+    const row = Math.floor(((e.clientY - rect.top) - PAD) / CELL);
+    if (row >= 0 && row < N && col >= 0 && col < N && board[row][col] === EMPTY)
+      drawStone(row, col, currentPlayer, 0.32);
+  }
 });
 
 canvas.addEventListener('mouseleave', function() {
   if (!isAnimating) drawBoard();
 });
 
+// ─── Game mode controls ───────────────────────────────────────────────────────
+
+function setGameMode(mode) {
+  gameMode = mode;
+  document.getElementById('btnModeStd').classList.toggle('active', mode === 'standard');
+  document.getElementById('btnModeRes').classList.toggle('active', mode === 'reserve');
+  document.getElementById('btnModeC4').classList.toggle('active',  mode === 'connect4');
+  document.getElementById('reserveInfo').style.display = mode === 'reserve' ? 'block' : 'none';
+  newGame();
+}
+
 // ─── AI ───────────────────────────────────────────────────────────────────────
 
 function cloneBoard(b) { return b.map(row => [...row]); }
+
+/**
+ * Return all legal moves for the current game mode.
+ * connect4 → only the bottom-most empty cell in each column.
+ * standard / reserve → every empty cell.
+ */
+function getLegalMoves(b) {
+  if (gameMode === 'connect4') {
+    const moves = [];
+    for (let c = 0; c < N; c++) {
+      for (let r = N - 1; r >= 0; r--) {
+        if (b[r][c] === EMPTY) { moves.push([r, c]); break; }
+      }
+    }
+    return moves;
+  }
+  const moves = [];
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      if (b[r][c] === EMPTY) moves.push([r, c]);
+  return moves;
+}
 
 /** Apply a move on board copy `b`, resolving symmetries in-place. */
 function applyMoveOnCopy(b, row, col, player) {
@@ -726,11 +842,9 @@ function minimax(b, depth, alpha, beta, isMaximizing) {
   const player = isMaximizing ? WHITE : BLACK;
   const half   = (N - 1) / 2;
 
-  // Collect empty cells, ordered center-first for better pruning
-  const moves = [];
-  for (let r = 0; r < N; r++)
-    for (let c = 0; c < N; c++)
-      if (b[r][c] === EMPTY) moves.push([r, c]);
+  // Collect legal moves for the current mode, ordered center-first for better pruning
+  const moves = getLegalMoves(b);
+  if (moves.length === 0) return evaluate(b);
   moves.sort(([r1,c1],[r2,c2]) =>
     (Math.abs(r1-half) + Math.abs(c1-half)) - (Math.abs(r2-half) + Math.abs(c2-half))
   );
@@ -763,10 +877,7 @@ function getBestMove() {
   const isMax = aiColor === WHITE;
   const half  = (N - 1) / 2;
 
-  const moves = [];
-  for (let r = 0; r < N; r++)
-    for (let c = 0; c < N; c++)
-      if (board[r][c] === EMPTY) moves.push([r, c]);
+  const moves = getLegalMoves(board);
   moves.sort(([r1,c1],[r2,c2]) =>
     (Math.abs(r1-half) + Math.abs(c1-half)) - (Math.abs(r2-half) + Math.abs(c2-half))
   );
@@ -848,6 +959,16 @@ function updateUI() {
   document.getElementById('whiteScore').textContent = w;
   document.getElementById('blackScore').textContent = bk;
   document.getElementById('stoneCount').textContent = `${w + bk} / ${N * N} placed`;
+
+  // Reserve display
+  if (gameMode === 'reserve') {
+    const wEl = document.getElementById('whiteReserveNum');
+    const bEl = document.getElementById('blackReserveNum');
+    wEl.textContent = whiteReserve;
+    bEl.textContent = blackReserve;
+    wEl.className = 'reserve-num' + (whiteReserve === 0 ? ' reserve-empty' : '');
+    bEl.className = 'reserve-num' + (blackReserve === 0 ? ' reserve-empty' : '');
+  }
 
   const ts = document.getElementById('turnStone');
   const tt = document.getElementById('turnText');
